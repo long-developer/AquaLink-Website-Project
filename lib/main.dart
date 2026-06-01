@@ -89,7 +89,7 @@ class AquaLinkApp extends StatelessWidget {
 class AppDataProvider extends ChangeNotifier {
   late final BroadcastSyncChannel _syncChannel;
   final String _instanceId =
-      '${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(1 << 32)}';
+      '${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(0x7FFFFFFF)}';
 
   AppDataProvider() {
     _syncChannel = createBroadcastSyncChannel(_handleSyncEvent);
