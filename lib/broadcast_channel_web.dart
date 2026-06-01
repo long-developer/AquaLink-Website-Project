@@ -33,6 +33,27 @@ class _WebBroadcastSyncChannel implements BroadcastSyncChannel {
     final message = jsonEncode({'type': eventType, 'payload': payload});
     _channel.postMessage(message);
   }
+
+  @override
+  Map<String, dynamic>? loadPersistedState() {
+    try {
+      final text = window.localStorage['aqualink_persisted_state'];
+      if (text == null || text.isEmpty) return null;
+      final decoded = jsonDecode(text) as Map<String, dynamic>;
+      return decoded;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  void savePersistedState(Map<String, dynamic> state) {
+    try {
+      window.localStorage['aqualink_persisted_state'] = jsonEncode(state);
+    } catch (_) {
+      // ignore local storage failures
+    }
+  }
 }
 
 BroadcastSyncChannel createBroadcastSyncChannelImpl(

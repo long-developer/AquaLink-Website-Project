@@ -10,4 +10,10 @@ class _NoopBroadcastSyncChannel implements BroadcastSyncChannel {
 
   @override
   void sendMessage(String eventType, Map<String, dynamic> payload) {}
+
+  @override
+  Map<String, dynamic>? loadPersistedState() => null;
+
+  @override
+  void savePersistedState(Map<String, dynamic> state) {}
 }

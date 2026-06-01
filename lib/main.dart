@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
@@ -87,9 +88,13 @@ class AquaLinkApp extends StatelessWidget {
 // Khu vực quản lí chung của app
 class AppDataProvider extends ChangeNotifier {
   late final BroadcastSyncChannel _syncChannel;
+  final String _instanceId =
+      '${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(1 << 32)}';
 
   AppDataProvider() {
     _syncChannel = createBroadcastSyncChannel(_handleSyncEvent);
+    _loadPersistedState();
+    Future.delayed(const Duration(milliseconds: 150), _requestRemoteState);
   }
 
   int _index = 0;
@@ -405,7 +410,161 @@ class AppDataProvider extends ChangeNotifier {
     super.dispose();
   }
 
+  void _requestRemoteState() {
+    _syncChannel.sendMessage('request_state', {
+      'instanceId': _instanceId,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Map<String, dynamic> _serializeUserForState(Map<String, dynamic> user) {
+    return {
+      'name': user['name'],
+      'password': user['password'],
+      'location': user['location'],
+      'contact': user['contact'],
+      'age': user['age'],
+      'bio': user['bio'],
+      'avatarBase64': user['avatarBytes'] != null
+          ? base64Encode(user['avatarBytes'] as Uint8List)
+          : null,
+    };
+  }
+
+  Map<String, dynamic> _serializePostForState(Map<String, dynamic> post) {
+    return {
+      'id': post['id'],
+      'author': post['author'],
+      'time': post['time'],
+      'content': post['content'],
+      'imageBase64': post['imageBytes'] != null
+          ? base64Encode(post['imageBytes'] as Uint8List)
+          : null,
+      'isSaved': post['isSaved'],
+    };
+  }
+
+  Map<String, dynamic> _deserializeUserFromState(Map<String, dynamic> raw) {
+    return {
+      'name': raw['name'],
+      'password': raw['password'],
+      'location': raw['location'],
+      'contact': raw['contact'],
+      'age': raw['age'],
+      'bio': raw['bio'],
+      'avatarBytes': raw['avatarBase64'] != null
+          ? base64Decode(raw['avatarBase64'] as String)
+          : null,
+    };
+  }
+
+  Map<String, dynamic> _deserializePostFromState(Map<String, dynamic> raw) {
+    return {
+      'id': raw['id'],
+      'author': raw['author'],
+      'time': raw['time'],
+      'content': raw['content'],
+      'imageBytes': raw['imageBase64'] != null
+          ? base64Decode(raw['imageBase64'] as String)
+          : null,
+      'isSaved': raw['isSaved'] ?? false,
+    };
+  }
+
+  void _loadPersistedState() {
+    final persisted = _syncChannel.loadPersistedState();
+    if (persisted == null) return;
+
+    final loadedUsers = persisted['users'] as Map<String, dynamic>?;
+    if (loadedUsers != null) {
+      for (final entry in loadedUsers.entries) {
+        if (!_users.containsKey(entry.key) &&
+            entry.value is Map<String, dynamic>) {
+          _users[entry.key] = _deserializeUserFromState(
+            Map<String, dynamic>.from(entry.value as Map<String, dynamic>),
+          );
+        }
+      }
+    }
+
+    final loadedPosts = persisted['posts'] as List<dynamic>?;
+    if (loadedPosts != null) {
+      for (final rawPost in loadedPosts) {
+        if (rawPost is Map<String, dynamic>) {
+          final postId = rawPost['id'] as int?;
+          if (postId != null && !_posts.any((post) => post['id'] == postId)) {
+            _posts.add(_deserializePostFromState(rawPost));
+          }
+        }
+      }
+    }
+
+    if (loadedUsers != null || loadedPosts != null) {
+      if (_posts.isNotEmpty) {
+        _posts.sort((a, b) => (b['id'] as int).compareTo(a['id'] as int));
+      }
+      notifyListeners();
+    }
+  }
+
+  void _persistState() {
+    _syncChannel.savePersistedState({
+      'users': _users.map(
+        (key, user) => MapEntry(key, _serializeUserForState(user)),
+      ),
+      'posts': _posts.map(_serializePostForState).toList(),
+    });
+  }
+
   void _handleSyncEvent(String type, Map<String, dynamic> payload) {
+    if (type == 'request_state') {
+      final requesterId = payload['instanceId'] as String?;
+      if (requesterId == null || requesterId == _instanceId) return;
+      _syncChannel.sendMessage('sync_state', {
+        'instanceId': _instanceId,
+        'users': _users.map(
+          (key, user) => MapEntry(key, _serializeUserForState(user)),
+        ),
+        'posts': _posts.map(_serializePostForState).toList(),
+      });
+      return;
+    }
+
+    if (type == 'sync_state') {
+      final senderId = payload['instanceId'] as String?;
+      if (senderId == null || senderId == _instanceId) return;
+
+      final loadedUsers = payload['users'] as Map<String, dynamic>?;
+      if (loadedUsers != null) {
+        for (final entry in loadedUsers.entries) {
+          if (!_users.containsKey(entry.key)) {
+            _users[entry.key] = Map<String, dynamic>.from(entry.value);
+          }
+        }
+      }
+
+      final loadedPosts = payload['posts'] as List<dynamic>?;
+      if (loadedPosts != null) {
+        for (final rawPost in loadedPosts) {
+          if (rawPost is Map<String, dynamic>) {
+            final postId = rawPost['id'] as int?;
+            if (postId != null && !_posts.any((post) => post['id'] == postId)) {
+              _posts.add(Map<String, dynamic>.from(rawPost));
+            }
+          }
+        }
+      }
+
+      if (loadedUsers != null || loadedPosts != null) {
+        if (_posts.isNotEmpty) {
+          _posts.sort((a, b) => (b['id'] as int).compareTo(a['id'] as int));
+        }
+        _persistState();
+        notifyListeners();
+      }
+      return;
+    }
+
     if (type == 'new_user') {
       final username = payload['username'] as String?;
       if (username == null || _users.containsKey(username)) return;
@@ -420,6 +579,7 @@ class AppDataProvider extends ChangeNotifier {
             ? base64Decode(payload['avatarBase64'] as String)
             : null,
       };
+      _persistState();
       notifyListeners();
       return;
     }
@@ -438,6 +598,7 @@ class AppDataProvider extends ChangeNotifier {
             : null,
         'isSaved': false,
       });
+      _persistState();
       notifyListeners();
       return;
     }
@@ -518,6 +679,7 @@ class AppDataProvider extends ChangeNotifier {
   void setCurrentUserAvatar(Uint8List? bytes) {
     if (_loggedInUsername.isEmpty) return;
     _users[_loggedInUsername]!['avatarBytes'] = bytes;
+    _persistState();
     notifyListeners();
   }
 
@@ -627,6 +789,8 @@ class AppDataProvider extends ChangeNotifier {
       'avatarBytes': null,
     };
 
+    _persistState();
+
     _syncChannel.sendMessage('new_user', {
       'username': normalizedUsername,
       'name': username.trim(),
@@ -728,6 +892,8 @@ class AppDataProvider extends ChangeNotifier {
       'imageBytes': _selectedImageBytes,
       'isSaved': false,
     });
+
+    _persistState();
 
     _syncChannel.sendMessage('new_post', {
       'id': postId,
