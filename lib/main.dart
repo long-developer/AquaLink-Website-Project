@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -607,8 +606,10 @@ class AppDataProvider extends ChangeNotifier {
       final fromUsername = payload['fromUsername'] as String?;
       final toUsername = payload['toUsername'] as String?;
       if (fromUsername == null || toUsername == null) return;
-      if (_loggedInUsername != fromUsername && _loggedInUsername != toUsername)
+      if (_loggedInUsername != fromUsername &&
+          _loggedInUsername != toUsername) {
         return;
+      }
 
       final text = payload['text'] as String? ?? '';
       final imageBytes = payload['imageBase64'] != null
@@ -1035,7 +1036,10 @@ class AppDataProvider extends ChangeNotifier {
     _isBotTyping = true;
     notifyListeners();
 
-    Future.delayed(const Duration(milliseconds: 1500), () async {
+    // Random delay từ 0.7s -> 2s để giống như bot đang suy nghĩ
+    final randomDelay = Random().nextInt(1300) + 700; // 700-2000ms
+
+    Future.delayed(Duration(milliseconds: randomDelay), () async {
       final t = translate;
       String reply = t('assistant_default');
       String input = text.toLowerCase();
@@ -1638,13 +1642,23 @@ class _PostScreenState extends State<PostScreen> {
   final ImagePicker _picker = ImagePicker();
 
   Future<void> _handlePickImage() async {
-    final XFile? pickedFile = await _picker.pickImage(
-      source: ImageSource.gallery,
-    );
-    if (pickedFile == null) return;
-    final bytes = await pickedFile.readAsBytes();
-    if (!mounted) return;
-    context.read<AppDataProvider>().pickImageBytes(bytes);
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 75,
+      );
+      if (pickedFile == null) return;
+      if (!mounted) return;
+      final bytes = await pickedFile.readAsBytes();
+      if (!mounted) return;
+      context.read<AppDataProvider>().pickImageBytes(bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Lỗi chọn ảnh: $e')));
+      }
+    }
   }
 
   @override
@@ -2337,7 +2351,7 @@ class UserDirectoryScreen extends StatelessWidget {
           : ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: users.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              separatorBuilder: (_, _) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final user = users[index];
                 return Card(
@@ -2490,20 +2504,31 @@ class _UserChatScreenState extends State<UserChatScreen> {
   }
 
   Future<void> _pickImage() async {
-    final image = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-    );
-    if (image == null) return;
-    final bytes = await image.readAsBytes();
-    setState(() {
-      _attachedImage = bytes;
-    });
+    try {
+      final image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+      );
+      if (image == null) return;
+      if (!mounted) return;
+      final bytes = await image.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _attachedImage = bytes;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Lỗi chọn ảnh: $e')));
+      }
+    }
   }
 
   void _sendMessage(AppDataProvider appData) {
-    if (_messageController.text.trim().isEmpty && _attachedImage == null)
+    if (_messageController.text.trim().isEmpty && _attachedImage == null) {
       return;
+    }
     appData.sendUserMessage(
       widget.targetUsername,
       text: _messageController.text,
@@ -2621,6 +2646,8 @@ class _UserChatScreenState extends State<UserChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _messageController,
+                      onSubmitted: (_) => _sendMessage(appData),
+                      textInputAction: TextInputAction.send,
                       decoration: InputDecoration(
                         hintText: t('type_message'),
                         contentPadding: const EdgeInsets.symmetric(
@@ -2666,13 +2693,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final ImagePicker _picker = ImagePicker();
 
   Future<void> _pickAvatar() async {
-    final image = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-    );
-    if (image == null) return;
-    final bytes = await image.readAsBytes();
-    context.read<AppDataProvider>().setCurrentUserAvatar(bytes);
+    try {
+      final image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+      );
+      if (image == null) return;
+      if (!mounted) return;
+      final bytes = await image.readAsBytes();
+      if (!mounted) return;
+      context.read<AppDataProvider>().setCurrentUserAvatar(bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Lỗi chọn ảnh: $e')));
+      }
+    }
   }
 
   @override
@@ -3074,6 +3111,102 @@ class AboutScreen extends StatelessWidget {
   }
 }
 
+// Widget hiệu ứng 3 chấm suy nghĩ
+class ThinkingDots extends StatefulWidget {
+  final String label;
+  final Color color;
+
+  const ThinkingDots({required this.label, required this.color, super.key});
+
+  @override
+  State<ThinkingDots> createState() => _ThinkingDotsState();
+}
+
+class _ThinkingDotsState extends State<ThinkingDots>
+    with TickerProviderStateMixin {
+  late AnimationController _controller;
+  late List<Animation<double>> _animations;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1200),
+      vsync: this,
+    )..repeat();
+
+    // Mỗi chấm có timing riêng trong chu kỳ 1200ms
+    _animations = [
+      // Chấm 1: nảy từ 0-30%, chờ 30-100%
+      TweenSequence<double>([
+        TweenSequenceItem(tween: Tween<double>(begin: 0, end: 10), weight: 30),
+        TweenSequenceItem(tween: Tween<double>(begin: 10, end: 0), weight: 70),
+      ]).animate(_controller),
+      // Chấm 2: chờ 0-15%, nảy 15-45%, chờ 45-100%
+      TweenSequence<double>([
+        TweenSequenceItem(tween: Tween<double>(begin: 0, end: 0), weight: 15),
+        TweenSequenceItem(tween: Tween<double>(begin: 0, end: 10), weight: 30),
+        TweenSequenceItem(tween: Tween<double>(begin: 10, end: 0), weight: 55),
+      ]).animate(_controller),
+      // Chấm 3: chờ 0-30%, nảy 30-60%, chờ 60-100%
+      TweenSequence<double>([
+        TweenSequenceItem(tween: Tween<double>(begin: 0, end: 0), weight: 30),
+        TweenSequenceItem(tween: Tween<double>(begin: 0, end: 10), weight: 30),
+        TweenSequenceItem(tween: Tween<double>(begin: 10, end: 0), weight: 40),
+      ]).animate(_controller),
+    ];
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          widget.label,
+          style: TextStyle(
+            color: widget.color,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 24,
+          height: 16,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: List.generate(3, (index) {
+              return AnimatedBuilder(
+                animation: _animations[index],
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(0, -_animations[index].value),
+                    child: Container(
+                      width: 4,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: widget.color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  );
+                },
+              );
+            }),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // 5. MÀN HÌNH TRỢ LÝ AquaBot
 class AssistantScreen extends StatefulWidget {
   const AssistantScreen({super.key});
@@ -3082,209 +3215,114 @@ class AssistantScreen extends StatefulWidget {
   State<AssistantScreen> createState() => _AssistantScreenState();
 }
 
-class _AssistantScreenState extends State<AssistantScreen>
-    with SingleTickerProviderStateMixin {
-  final _msgController = TextEditingController();
-  late final AnimationController _typingController;
-
-  @override
-  void initState() {
-    super.initState();
-    _typingController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    )..repeat();
-  }
+class _AssistantScreenState extends State<AssistantScreen> {
+  final TextEditingController _msgController = TextEditingController();
 
   @override
   void dispose() {
-    _typingController.dispose();
     _msgController.dispose();
     super.dispose();
   }
 
-  void _sendMessage(AppDataProvider appData) {
+  void _sendMessage() {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
-    appData.sendMessage(text);
+    context.read<AppDataProvider>().sendMessage(text);
     _msgController.clear();
   }
 
   @override
   Widget build(BuildContext context) {
-    final appData = context.watch<AppDataProvider>();
-
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Icon(Icons.smart_toy, color: theme.colorScheme.primary),
-            const SizedBox(width: 8),
-            const Text(
-              'AquaBot Assistant',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: appData.messages.length,
-              itemBuilder: (context, index) {
-                final msg = appData.messages[index];
-                final isBot = msg['isBot'] as bool;
+    final appData = context.watch<AppDataProvider>();
+    final messages = appData.messages;
 
-                return Align(
-                  alignment: isBot
-                      ? Alignment.centerLeft
-                      : Alignment.centerRight,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 6),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: isBot
-                          ? theme.colorScheme.surface
-                          : theme.colorScheme.primary,
-                      borderRadius: BorderRadius.circular(16).copyWith(
-                        bottomLeft: isBot
-                            ? const Radius.circular(0)
-                            : const Radius.circular(16),
-                        bottomRight: isBot
-                            ? const Radius.circular(16)
-                            : const Radius.circular(0),
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                itemCount: messages.length,
+                itemBuilder: (context, index) {
+                  final message = messages[index];
+                  final isBot = message['isBot'] as bool;
+                  return Align(
+                    alignment: isBot
+                        ? Alignment.centerLeft
+                        : Alignment.centerRight,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: theme.shadowColor.withValues(alpha: 0.08),
-                          blurRadius: 4,
-                        ),
-                      ],
-                    ),
-                    constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.75,
-                    ),
-                    child: Text(
-                      msg['text'] as String,
-                      style: TextStyle(
+                      constraints: const BoxConstraints(maxWidth: 300),
+                      decoration: BoxDecoration(
                         color: isBot
-                            ? theme.colorScheme.onSurface
-                            : theme.colorScheme.onPrimary,
-                        fontSize: 15,
+                            ? theme.colorScheme.surfaceContainerHighest
+                            : theme.colorScheme.primary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        message['text'] as String,
+                        style: TextStyle(
+                          color: isBot
+                              ? theme.colorScheme.onSurface
+                              : theme.colorScheme.onPrimary,
+                        ),
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
-          if (appData.isBotTyping)
+            if (appData.isBotTyping)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: ThinkingDots(
+                  label: appData.translate('assistant_thinking'),
+                  color: theme.colorScheme.primary,
+                ),
+              ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: Row(
                 children: [
-                  SizedBox(
-                    width: 42,
-                    height: 18,
-                    child: AnimatedBuilder(
-                      animation: _typingController,
-                      builder: (context, child) {
-                        final value = _typingController.value;
-                        final offset = (value * 2 - 1) * 3;
-                        return Transform.translate(
-                          offset: Offset(0, -offset),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: List.generate(3, (dotIndex) {
-                              final dotValue =
-                                  ((value + dotIndex * 0.2) % 1.0) * 2;
-                              final scale =
-                                  0.6 + 0.4 * (1 - (dotValue - 1).abs());
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 2,
-                                ),
-                                child: Transform.scale(
-                                  scale: scale,
-                                  child: Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.primary,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }),
-                          ),
-                        );
-                      },
+                  Expanded(
+                    child: TextField(
+                      controller: _msgController,
+                      onSubmitted: (_) => _sendMessage(),
+                      textInputAction: TextInputAction.send,
+                      decoration: InputDecoration(
+                        hintText: appData.translate('assistant_hint'),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Text(
-                    appData.translate('assistant_thinking'),
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
-                      fontSize: 14,
+                  const SizedBox(width: 8),
+                  CircleAvatar(
+                    backgroundColor: theme.colorScheme.primary,
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.send,
+                        color: theme.colorScheme.onPrimary,
+                      ),
+                      onPressed: _sendMessage,
                     ),
                   ),
                 ],
               ),
             ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              boxShadow: [
-                BoxShadow(
-                  color: theme.shadowColor.withValues(alpha: 0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _msgController,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _sendMessage(appData),
-                    decoration: InputDecoration(
-                      hintText: appData.translate('assistant_hint'),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: theme.colorScheme.surface,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                CircleAvatar(
-                  backgroundColor: theme.colorScheme.primary,
-                  child: IconButton(
-                    icon: Icon(Icons.send, color: theme.colorScheme.onPrimary),
-                    onPressed: () {
-                      appData.sendMessage(_msgController.text);
-                      _msgController.clear();
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
