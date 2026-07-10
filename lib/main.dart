@@ -93,6 +93,7 @@ class AppDataProvider extends ChangeNotifier {
   AppDataProvider() {
     _syncChannel = createBroadcastSyncChannel(_handleSyncEvent);
     _loadPersistedState();
+    _initializeDefaultAccounts();
     Future.delayed(const Duration(milliseconds: 150), _requestRemoteState);
   }
 
@@ -627,6 +628,23 @@ class AppDataProvider extends ChangeNotifier {
         'timestamp': DateTime.now(),
       });
       notifyListeners();
+    }
+  }
+
+  void _initializeDefaultAccounts() {
+    // Tạo tài khoản mặc định nếu chưa tồn tại
+    const defaultUsername = 'mongtiengdev';
+    if (!_users.containsKey(defaultUsername)) {
+      _users[defaultUsername] = {
+        'name': 'mongtiengdev',
+        'password': 'mt2026',
+        'location': 'Việt Nam',
+        'contact': 'admin@aqualink.vn',
+        'age': 25,
+        'bio': 'Tài khoản quản trị viên hệ thống',
+        'avatarBytes': null,
+      };
+      _persistState();
     }
   }
 
