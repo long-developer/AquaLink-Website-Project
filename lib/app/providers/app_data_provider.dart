@@ -571,6 +571,20 @@ class AppDataProvider extends ChangeNotifier {
       };
       _persistState();
     }
+
+    const virtualUsername = 'nguyenthuantom';
+    if (!_users.containsKey(virtualUsername)) {
+      _users[virtualUsername] = {
+        'name': 'Nguyễn Thuận - Tôm',
+        'password': 'tmt2026',
+        'location': 'Phường 2, TP.Trà Vinh, Trà Vinh',
+        'contact': 'nguyenthuantom@gmail.com',
+        'age': 30,
+        'bio': 'Tài khoản ảo để trao đổi về tôm và nuôi trồng.',
+        'avatarBytes': null,
+      };
+      _persistState();
+    }
   }
 
   bool _isLoggedIn = false;
@@ -655,15 +669,38 @@ class AppDataProvider extends ChangeNotifier {
 
     Future.delayed(const Duration(milliseconds: 900), () {
       final responseThread = _chatThreads.putIfAbsent(targetUsername, () => []);
+      final responseText = _buildAutoReply(targetUsername, text?.trim() ?? '');
       responseThread.add({
         'sender': targetUsername,
-        'text':
-            'Tin nhắn của bạn đã được gửi đến ${getUserDisplayName(targetUsername)}. Họ sẽ trả lời sớm.',
+        'text': responseText,
         'imageBytes': null,
         'timestamp': DateTime.now(),
       });
       notifyListeners();
     });
+  }
+
+  String _buildAutoReply(String targetUsername, String message) {
+    final displayName = getUserDisplayName(targetUsername);
+    final lowered = message.toLowerCase();
+
+    if (targetUsername.toLowerCase() == 'nguyenthuantom') {
+      if (lowered.contains('chào') || lowered.contains('hello')) {
+        return 'Chào bạn! Mình là $displayName. Mình có thể giúp bạn trao đổi về tôm, giá cả, hoặc kỹ thuật nuôi trồng.';
+      }
+      if (lowered.contains('giá') || lowered.contains('price')) {
+        return 'Giá tôm hôm nay đang biến động nhẹ, bạn nên theo dõi thường xuyên để quyết định bán đúng thời điểm.';
+      }
+      if (lowered.contains('bệnh') || lowered.contains('disease')) {
+        return 'Nếu tôm có dấu hiệu lờ đờ hoặc đốm trắng, hãy kiểm tra nước và liên hệ kỹ thuật viên sớm nhé.';
+      }
+      if (lowered.contains('nuôi') || lowered.contains('ao')) {
+        return 'Với ao nuôi, việc thay nước đều đặn và giữ môi trường ổn định là rất quan trọng.';
+      }
+      return 'Cảm ơn bạn đã nhắn cho mình. Mình có thể trao đổi về giá tôm, bệnh tôm hoặc cách nuôi khỏe.';
+    }
+
+    return 'Tin nhắn của bạn đã được gửi đến $displayName. Họ sẽ trả lời sớm.';
   }
 
   String? logIn(String username, String password) {
