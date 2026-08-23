@@ -43,3 +43,31 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Widget Preview related
+.widget_preview/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Firebase
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Certificates and keys
+*.pem
+*.key
+*.p12
+*.crt
+*.cer
+*.jks
+*.keystore
+
+# Android
+**/android/key.properties
+**/android/local.properties
+
+# Node
+node_modules/

@@ -149,7 +149,7 @@ class AppDataProvider extends ChangeNotifier {
       'assistant_hygiene':
           'Để giữ vệ sinh ao nuôi, bạn nên rải vôi nông nghiệp định kỳ và đảm bảo hệ thống lọc nước hoạt động tốt.',
       'assistant_unknown':
-          'Xin lỗi, mình chưa hiểu bạn hỏi gì :( Bạn có thể hỏi về giá tôm hôm nay hoặc cách vệ sinh ao nuôi...! Câu hỏi của bạn đã được ghi nhận, tương lai đội ngũ AquaLink sẽ cập nhật.',
+          'Không thể kết nối tới server AquaBot. Bạn hãy đảm bảo đã chạy "node server.js" nhé!',
       'bio_empty':
           'Chưa có tiểu sử. Nhấn nút chỉnh sửa để cập nhật thông tin của bạn.',
       'delete_message': 'Xoá tin nhắn',
@@ -280,7 +280,7 @@ class AppDataProvider extends ChangeNotifier {
       'assistant_hygiene':
           'To keep the pond clean, apply agricultural lime regularly and ensure filtration works properly.',
       'assistant_unknown':
-          'Sorry, I did not understand. You can ask about today’s shrimp prices or pond hygiene... Your question is recorded and AquaLink may update soon.',
+          'Could not connect to AquaBot server. Please ensure "node server.js" is running!',
       'bio_empty': 'No bio yet. Tap edit to update your profile.',
       'delete_message': 'Delete message',
       'unknown_location': 'Unknown',
@@ -298,7 +298,7 @@ class AppDataProvider extends ChangeNotifier {
       'change_password_button': 'Save Changes',
     },
   };
-
+  //Khu đang fix
   String translate(String key) {
     return _localizedStrings['vi']?[key] ?? key;
   }
@@ -1002,37 +1002,66 @@ class AppDataProvider extends ChangeNotifier {
   bool _isBotTyping = false;
   bool get isBotTyping => _isBotTyping;
 
-  void sendMessage(String text) {
+  // Xác định Server URL theo platform
+  String get _backendUrl {
+    if (kIsWeb) {
+      return 'http://localhost:5000/api/chat';
+    } else {
+      return defaultTargetPlatform == TargetPlatform.android
+          ? 'http://10.0.2.2:5000/api/chat'
+          : 'http://localhost:5000/api/chat';
+    }
+  }
+
+  Future<void> sendMessage(String text) async {
     if (text.trim().isEmpty) return;
 
+    // Thêm tin nhắn của user vào UI ngay
     _messages.add({'isBot': false, 'text': text});
     _isBotTyping = true;
     notifyListeners();
 
-    final randomDelay = Random().nextInt(1300) + 700;
+    try {
+      // Gọi HTTP POST tới Node.js Backend
+      final response = await http
+          .post(
+            Uri.parse(_backendUrl),
+            headers: {'Content-Type': 'application/json; charset=utf-8'},
+            body: jsonEncode({'message': text}),
+          )
+          .timeout(
+            const Duration(seconds: 90),
+            onTimeout: () {
+              throw TimeoutException('Timeout after 90 seconds');
+            },
+          );
 
-    Future.delayed(Duration(milliseconds: randomDelay), () async {
-      final t = translate;
-      String reply = t('assistant_default');
-      String input = text.toLowerCase();
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
 
-      if (input.contains('chào') || input.contains('hello')) {
-        reply = t('assistant_greeting');
-      } else if (input.contains('giá tôm') || input.contains('shrimp price')) {
-        reply = t('assistant_price');
-      } else if (input.contains('bệnh') ||
-          input.contains('chết') ||
-          input.contains('disease')) {
-        reply = t('assistant_disease');
-      } else if (input.contains('vệ sinh') || input.contains('hygiene')) {
-        reply = t('assistant_hygiene');
+        // Cập nhật câu trả lời từ Gemini API
+        if (data is Map && data['reply'] is String) {
+          _messages.add({'isBot': true, 'text': data['reply']});
+        } else {
+          _messages.add({
+            'isBot': true,
+            'text': 'Format response không hợp lệ',
+          });
+        }
       } else {
-        reply = t('assistant_unknown');
+        _messages.add({'isBot': true, 'text': 'Lỗi ${response.statusCode}'});
       }
-
+    } on TimeoutException {
+      _messages.add({
+        'isBot': true,
+        'text':
+            '⏱️ Server không phản hồi. Hãy chạy: node server.js trên port 5000',
+      });
+    } catch (e) {
+      _messages.add({'isBot': true, 'text': 'Lỗi: ${e.toString()}'});
+    } finally {
       _isBotTyping = false;
-      _messages.add({'isBot': true, 'text': reply});
       notifyListeners();
-    });
+    }
   }
 }

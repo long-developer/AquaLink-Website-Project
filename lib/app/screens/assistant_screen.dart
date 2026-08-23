@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 import 'package:project_aqualink/app/providers/app_data_provider.dart';
 
@@ -11,18 +12,35 @@ class AssistantScreen extends StatefulWidget {
 
 class _AssistantScreenState extends State<AssistantScreen> {
   final TextEditingController _msgController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void dispose() {
     _msgController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   void _sendMessage() {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
-    context.read<AppDataProvider>().sendMessage(text);
+
     _msgController.clear();
+
+    // Gọi hàm sendMessage trong AppDataProvider
+    final provider = context.read<AppDataProvider>();
+    provider.sendMessage(text);
+
+    // Tự động cuộn xuống cuối danh sách
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
@@ -37,6 +55,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
           children: [
             Expanded(
               child: ListView.builder(
+                controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                 itemCount: messages.length,
                 itemBuilder: (context, index) {
@@ -59,14 +78,41 @@ class _AssistantScreenState extends State<AssistantScreen> {
                             : theme.colorScheme.primary,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Text(
-                        message['text'] as String,
-                        style: TextStyle(
-                          color: isBot
-                              ? theme.colorScheme.onSurface
-                              : theme.colorScheme.onPrimary,
-                        ),
-                      ),
+                      child: isBot
+                          ? MarkdownBody(
+                              data: message['text'] as String,
+                              shrinkWrap: true,
+                              styleSheet: MarkdownStyleSheet(
+                                p: TextStyle(
+                                  color: theme.colorScheme.onSurface,
+                                  height: 1.35,
+                                ),
+                                h1: TextStyle(
+                                  color: theme.colorScheme.onSurface,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                h2: TextStyle(
+                                  color: theme.colorScheme.onSurface,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                h3: TextStyle(
+                                  color: theme.colorScheme.onSurface,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                listBullet: TextStyle(
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                            )
+                          : Text(
+                              message['text'] as String,
+                              style: TextStyle(
+                                color: theme.colorScheme.onPrimary,
+                              ),
+                            ),
                     ),
                   );
                 },
