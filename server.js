@@ -56,12 +56,12 @@ function chatRateLimit(req, res, next) {
 // Kiểm tra API Key đã được nạp từ file .env chưa
 const apiKey = process.env.GEMINI_KEY_FREE || process.env.GEMINI_KEY_PAID;
 if (!apiKey) {
-    console.error("❌ CHƯA CÓ API KEY! Hãy kiểm tra lại file .env");
+    console.error("❌ CHƯA CÓ API KEY! Hãy kiểm tra lại file .env hoặc biến môi trường Render.");
 } else {
     console.log("🔑 Đã nhận API Key thành công.");
 }
 
-const ai = new GoogleGenAI({ apiKey: apiKey });
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 // Route test server
 app.get('/', (req, res) => {
@@ -75,6 +75,13 @@ app.post('/api/chat', chatRateLimit, async (req, res) => {
 
         if (!message) {
             return res.status(400).json({ error: 'Nội dung tin nhắn không được để trống' });
+        }
+
+        if (!ai) {
+            return res.status(500).json({
+                error: 'Gemini API chưa được cấu hình',
+                details: 'Vui lòng khai báo GEMINI_KEY_FREE hoặc GEMINI_KEY_PAID trong biến môi trường Render.'
+            });
         }
 
         console.log(`📩 [Client gửi]: ${message}`);
