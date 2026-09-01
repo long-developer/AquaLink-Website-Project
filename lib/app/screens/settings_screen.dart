@@ -411,78 +411,279 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-class UserDirectoryScreen extends StatelessWidget {
+class UserDirectoryScreen extends StatefulWidget {
   const UserDirectoryScreen({super.key});
+
+  @override
+  State<UserDirectoryScreen> createState() => _UserDirectoryScreenState();
+}
+
+class _UserDirectoryScreenState extends State<UserDirectoryScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  List<Map<String, dynamic>> _users = const [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContacts();
+  }
+
+  Future<void> _loadContacts({String query = ''}) async {
+    final appData = context.read<AppDataProvider>();
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final result = query.trim().isEmpty
+          ? await appData.fetchContacts()
+          : await appData.searchUsers(query);
+      if (!mounted) return;
+      setState(() {
+        _users = result;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final appData = context.watch<AppDataProvider>();
-    final users = appData.userDirectory;
     final t = appData.translate;
 
     return Scaffold(
       appBar: AppBar(title: Text(t('user_directory'))),
-      body: users.isEmpty
-          ? Center(
-              child: Text(
-                t('no_users_found'),
-                style: const TextStyle(fontSize: 16),
+      body: Column(
+        children: [
+          if (appData.latestNotificationText.isNotEmpty) ...[
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF007C89).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: const Color(0xFF007C89).withValues(alpha: 0.3),
+                ),
               ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: users.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final user = users[index];
-                return Card(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.notifications_active_rounded,
+                    color: Color(0xFF007C89),
                   ),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    leading: CircleAvatar(
-                      backgroundColor: const Color(0xFF007C89),
-                      backgroundImage:
-                          appData.getUserAvatar(user['username'] as String) !=
-                              null
-                          ? MemoryImage(
-                              appData.getUserAvatar(
-                                user['username'] as String,
-                              )!,
-                            )
-                          : null,
-                      child:
-                          appData.getUserAvatar(user['username'] as String) ==
-                              null
-                          ? Text(
-                              (user['name'] as String).substring(0, 1),
-                              style: const TextStyle(color: Colors.white),
-                            )
-                          : null,
-                    ),
-                    title: Text(user['name'] as String),
-                    subtitle: Text(
-                      '${t('user_address')}: ${user['location'] as String}',
-                    ),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => UserProfileScreen(
-                            username: user['username'] as String,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () {
+                        appData.clearLatestNotification();
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => UserChatScreen(
+                              targetUsername: appData.latestNotificationFrom,
+                            ),
                           ),
+                        );
+                      },
+                      child: Text(
+                        'Tin nhắn mới từ ${appData.latestNotificationFrom}: ${appData.latestNotificationText}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: appData.clearLatestNotification,
+                  ),
+                ],
+              ),
+            ),
+          ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: TextField(
+              controller: _searchController,
+              onSubmitted: (value) => _loadContacts(query: value),
+              decoration: InputDecoration(
+                hintText: 'Tìm tên / username / email',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          _loadContacts();
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                ? Center(child: Text(_error!, textAlign: TextAlign.center))
+                : _users.isEmpty
+                ? Center(
+                    child: Text(
+                      t('no_users_found'),
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _users.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final user = _users[index];
+                      final username =
+                          (user['username'] ?? user['partnerId'] ?? '')
+                              .toString();
+                      final name = (user['name'] ?? username).toString();
+                      final location = (user['location'] ?? 'Việt Nam')
+                          .toString();
+                      final lastMessage = (user['lastMessage'] ?? '')
+                          .toString();
+                      final isOnline = appData.isUserOnline(username);
+
+                      return Card(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          leading: CircleAvatar(
+                            backgroundColor: const Color(0xFF007C89),
+                            child: Text(
+                              name.isNotEmpty
+                                  ? name.substring(0, 1).toUpperCase()
+                                  : 'U',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ),
+                          title: Row(
+                            children: [
+                              Expanded(child: Text(name)),
+                              if (isOnline)
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  margin: const EdgeInsets.only(left: 8),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.green,
+                                    shape: BoxShape.circle,
+                                  ),
+                                )
+                              else
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  margin: const EdgeInsets.only(left: 8),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.grey,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          subtitle: Text(
+                            lastMessage.isNotEmpty
+                                ? lastMessage
+                                : '${t('user_address')}: $location',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: SizedBox(
+                            width: 100,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                if (appData.getUnreadCount(username) > 0)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF00A7B5),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      appData.getUnreadCount(username) > 99
+                                          ? '99+'
+                                          : appData
+                                                .getUnreadCount(username)
+                                                .toString(),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(width: 8),
+                                GestureDetector(
+                                  onTap: () {
+                                    appData.clearUnreadCount(username);
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => UserChatScreen(
+                                          targetUsername: username,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: const Icon(
+                                    Icons.message_rounded,
+                                    color: Color(0xFF007C89),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    UserProfileScreen(username: username),
+                              ),
+                            );
+                          },
                         ),
                       );
                     },
                   ),
-                );
-              },
-            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -577,6 +778,30 @@ class _UserChatScreenState extends State<UserChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
   Uint8List? _attachedImage;
+  bool _loadingHistory = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final appData = context.read<AppDataProvider>();
+    appData.clearUnreadCount(widget.targetUsername);
+    _loadConversation();
+  }
+
+  Future<void> _loadConversation() async {
+    final appData = context.read<AppDataProvider>();
+    try {
+      await appData.fetchConversationHistory(widget.targetUsername);
+    } catch (_) {
+      // fallback to local data if server is unavailable
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingHistory = false;
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -607,15 +832,17 @@ class _UserChatScreenState extends State<UserChatScreen> {
   }
 
   void _sendMessage(AppDataProvider appData) {
-    if (_messageController.text.trim().isEmpty && _attachedImage == null) {
+    final text = _messageController.text.trim();
+    if ((text.isEmpty && _attachedImage == null) ||
+        appData.currentUserId.isEmpty) {
       return;
     }
-    appData.sendUserMessage(
-      widget.targetUsername,
-      text: _messageController.text,
-      imageBytes: _attachedImage,
-    );
-    _messageController.clear();
+
+    if (text.isNotEmpty) {
+      appData.sendPrivateMessage(widget.targetUsername, text);
+      _messageController.clear();
+    }
+
     setState(() {
       _attachedImage = null;
     });
@@ -624,7 +851,7 @@ class _UserChatScreenState extends State<UserChatScreen> {
   @override
   Widget build(BuildContext context) {
     final appData = context.watch<AppDataProvider>();
-    final messages = appData.getChatThread(widget.targetUsername);
+    final messages = appData.getPrivateChatThread(widget.targetUsername);
     final targetName = appData.getUserDisplayName(widget.targetUsername);
     final t = appData.translate;
 
@@ -633,7 +860,9 @@ class _UserChatScreenState extends State<UserChatScreen> {
       body: Column(
         children: [
           Expanded(
-            child: messages.isEmpty
+            child: _loadingHistory
+                ? const Center(child: CircularProgressIndicator())
+                : messages.isEmpty
                 ? Center(
                     child: Text(
                       t('no_messages'),

@@ -48,29 +48,40 @@ class _AuthScreenState extends State<AuthScreen> {
     });
   }
 
-  void _handleSubmit() {
+  Future<void> _handleSubmit() async {
     final appData = context.read<AppDataProvider>();
     if (_isRegisterMode) {
-      final error = appData.signUp(
-        location: _locationController.text,
-        username: _usernameController.text,
-        contact: _contactController.text,
-        age: _ageController.text,
+      if (_locationController.text.trim().isEmpty ||
+          _contactController.text.trim().isEmpty ||
+          _ageController.text.trim().isEmpty) {
+        setState(() {
+          _errorText = appData.translate('error_missing_fields');
+        });
+        return;
+      }
+
+      final error = await appData.signUpWithBackend(
+        name: _locationController.text.trim(),
+        username: _usernameController.text.trim(),
+        email: _contactController.text.trim(),
         password: _passwordController.text,
-        confirmPassword: _confirmPasswordController.text,
       );
+
       if (error != null) {
         setState(() {
           _errorText = error;
         });
         return;
       }
+
       _clearFields();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(appData.translate('registration_success'))),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(appData.translate('registration_success'))),
+        );
+      }
     } else {
-      final error = appData.logIn(
+      final error = await appData.loginWithBackend(
         _usernameController.text,
         _passwordController.text,
       );
@@ -81,9 +92,11 @@ class _AuthScreenState extends State<AuthScreen> {
         return;
       }
       _clearFields();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(appData.translate('login_success'))),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(appData.translate('login_success'))),
+        );
+      }
     }
   }
 

@@ -104,6 +104,9 @@ class GlassBottomNav extends StatelessWidget {
                       children: List.generate(_items.length, (index) {
                         final item = _items[index];
                         final selected = nav.targetIndex == index;
+                        final totalUnread = index == 3
+                            ? appData.getTotalUnreadCount()
+                            : 0;
 
                         return Expanded(
                           child: InkWell(
@@ -114,31 +117,57 @@ class GlassBottomNav extends StatelessWidget {
                                 horizontal: 4,
                                 vertical: 8,
                               ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
+                              child: Stack(
+                                alignment: Alignment.topRight,
                                 children: [
-                                  Icon(
-                                    item.icon,
-                                    size: 24,
-                                    color: selected
-                                        ? const Color(0xFF007C89)
-                                        : const Color(0xFF5D7A83),
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        item.icon,
+                                        size: 24,
+                                        color: selected
+                                            ? const Color(0xFF007C89)
+                                            : const Color(0xFF5D7A83),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        appData.translate(item.labelKey),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: selected
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                          color: selected
+                                              ? const Color(0xFF007C89)
+                                              : const Color(0xFF5D7A83),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    appData.translate(item.labelKey),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: selected
-                                          ? FontWeight.w700
-                                          : FontWeight.w500,
-                                      color: selected
-                                          ? const Color(0xFF007C89)
-                                          : const Color(0xFF5D7A83),
+                                  if (totalUnread > 0)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 5,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        totalUnread > 99
+                                            ? '99+'
+                                            : '$totalUnread',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 10,
+                                        ),
+                                      ),
                                     ),
-                                  ),
                                 ],
                               ),
                             ),

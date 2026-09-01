@@ -71,3 +71,4 @@ app.*.map.json
 
 # Node
 node_modules/
+.vercel

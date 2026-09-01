@@ -5,8 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as html_parser;
 import 'package:project_aqualink/broadcast_channel.dart';
+import 'package:socket_io_client/socket_io_client.dart' as sio;
 
 class AppDataProvider extends ChangeNotifier {
+  final String baseUrl = 'https://aqualink-website-project.onrender.com';
+
   late final BroadcastSyncChannel _syncChannel;
   Timer? _remoteStateTimer;
   final String _instanceId =
@@ -593,6 +596,393 @@ class AppDataProvider extends ChangeNotifier {
   String _loggedInUsername = '';
   String get username => _loggedInUsername;
 
+  String _authToken = '';
+  String get authToken => _authToken;
+
+  String _currentUserId = '';
+  String get currentUserId => _currentUserId;
+
+  sio.Socket? _socket;
+  bool get isSocketConnected => _socket?.connected ?? false;
+
+  final Map<String, bool> _onlineUsers = {};
+  bool isUserOnline(String userId) => _onlineUsers[userId] ?? false;
+
+  String _latestNotificationText = '';
+  String get latestNotificationText => _latestNotificationText;
+
+  String _latestNotificationFrom = '';
+  String get latestNotificationFrom => _latestNotificationFrom;
+
+  void clearLatestNotification() {
+    _latestNotificationText = '';
+    _latestNotificationFrom = '';
+    notifyListeners();
+  }
+
+  final Map<String, List<Map<String, dynamic>>> _privateChatThreads = {};
+  final Map<String, int> _unreadCounts = {};
+
+  String _chatKey(String a, String b) {
+    final list = [a, b]..sort();
+    return list.join('_');
+  }
+
+  int getUnreadCount(String username) => _unreadCounts[username] ?? 0;
+
+  int getTotalUnreadCount() {
+    return _unreadCounts.values.fold(0, (sum, count) => sum + count);
+  }
+
+  void clearUnreadCount(String username) {
+    if (_unreadCounts.containsKey(username)) {
+      _unreadCounts[username] = 0;
+      notifyListeners();
+    }
+  }
+
+  List<Map<String, dynamic>> getPrivateChatThread(String otherUserId) {
+    final key = _chatKey(_currentUserId, otherUserId);
+    return List.unmodifiable(_privateChatThreads[key] ?? const []);
+  }
+
+  void _appendPrivateMessage(Map<String, dynamic> payload) {
+    final fromUserId = (payload['fromUserId'] ?? '').toString();
+    final toUserId = (payload['toUserId'] ?? '').toString();
+    final messageText = (payload['message'] ?? '').toString();
+    final conversationId =
+        (payload['conversationId'] ?? _chatKey(fromUserId, toUserId))
+            .toString();
+    final threadKey = conversationId;
+    final thread = _privateChatThreads.putIfAbsent(threadKey, () => []);
+    thread.add({
+      'sender': fromUserId == _currentUserId ? 'me' : fromUserId,
+      'text': messageText,
+      'imageBytes': null,
+      'timestamp': payload['createdAt'] ?? DateTime.now().toIso8601String(),
+    });
+
+    if (fromUserId != _currentUserId && messageText.isNotEmpty) {
+      _latestNotificationText = messageText;
+      _latestNotificationFrom = fromUserId;
+      _unreadCounts[fromUserId] = (_unreadCounts[fromUserId] ?? 0) + 1;
+    }
+    notifyListeners();
+  }
+
+  Future<void> connectRealtimeSocket() async {
+    if (_socket != null) {
+      if (_socket!.connected) return;
+      _socket!.connect();
+      return;
+    }
+
+    _socket = sio.io(
+      baseUrl,
+      sio.OptionBuilder()
+          .setTransports(['websocket'])
+          .disableAutoConnect()
+          .build(),
+    );
+
+    _socket!.onConnect((_) {
+      if (_currentUserId.isNotEmpty) {
+        _socket!.emit('register_user', {
+          'userId': _currentUserId,
+          'username': _currentUserId,
+        });
+      }
+      notifyListeners();
+    });
+
+    _socket!.onDisconnect((_) {
+      notifyListeners();
+    });
+
+    _socket!.on('receive_private_message', (data) {
+      if (data is Map<String, dynamic>) {
+        _appendPrivateMessage(data);
+      } else if (data is Map) {
+        _appendPrivateMessage(Map<String, dynamic>.from(data));
+      }
+    });
+
+    _socket!.on('user_online', (data) {
+      if (data is Map) {
+        final userId = (data['userId'] ?? '').toString();
+        if (userId.isEmpty) return;
+        _onlineUsers[userId] = (data['online'] ?? false) as bool;
+        notifyListeners();
+      }
+    });
+
+    _socket!.on('conversation_history', (data) {
+      if (data is Map) {
+        final items = (data['messages'] as List?) ?? const [];
+        final conversationId = (data['conversationId'] ?? '').toString();
+        final thread = _privateChatThreads.putIfAbsent(
+          conversationId,
+          () => [],
+        );
+        thread.clear();
+        for (final item in items) {
+          if (item is Map) {
+            final raw = Map<String, dynamic>.from(item);
+            thread.add({
+              'sender': (raw['fromUserId'] ?? '').toString() == _currentUserId
+                  ? 'me'
+                  : (raw['fromUserId'] ?? '').toString(),
+              'text': (raw['message'] ?? '').toString(),
+              'imageBytes': null,
+              'timestamp': raw['createdAt'] ?? DateTime.now().toIso8601String(),
+            });
+          }
+        }
+        notifyListeners();
+      }
+    });
+
+    _socket!.on('error_message', (data) {
+      // Error message from server
+    });
+
+    _socket!.connect();
+  }
+
+  Future<void> disconnectRealtimeSocket() async {
+    _socket?.disconnect();
+    _socket = null;
+    notifyListeners();
+  }
+
+  Future<Map<String, dynamic>> checkServerHealth() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/health'))
+          .timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => throw Exception('Server health check timeout'),
+          );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Server returned ${response.statusCode}');
+      }
+    } catch (e) {
+      return {'status': 'error', 'message': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> registerUser({
+    required String name,
+    required String username,
+    required String email,
+    required String password,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/register'),
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: jsonEncode({
+        'name': name,
+        'username': username,
+        'email': email,
+        'password': password,
+      }),
+    );
+
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode >= 400) {
+      throw Exception(data['error'] ?? 'Đăng ký thất bại');
+    }
+
+    _authToken = (data['token'] ?? '').toString();
+    _currentUserId = (data['user']?['username'] ?? username).toString();
+    _loggedInUsername = _currentUserId;
+    _isLoggedIn = true;
+    await connectRealtimeSocket();
+    notifyListeners();
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<Map<String, dynamic>> loginUser({
+    required String emailOrUsername,
+    required String password,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/login'),
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: jsonEncode({
+        'email': emailOrUsername,
+        'username': emailOrUsername,
+        'password': password,
+      }),
+    );
+
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode >= 400) {
+      throw Exception(data['error'] ?? 'Đăng nhập thất bại');
+    }
+
+    _authToken = (data['token'] ?? '').toString();
+    _currentUserId = (data['user']?['username'] ?? '').toString();
+    _loggedInUsername = _currentUserId;
+    _isLoggedIn = true;
+    await connectRealtimeSocket();
+    notifyListeners();
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<String?> loginWithBackend(
+    String emailOrUsername,
+    String password,
+  ) async {
+    if (emailOrUsername.trim().isEmpty || password.isEmpty) {
+      return translate('error_login_fields');
+    }
+
+    try {
+      await loginUser(
+        emailOrUsername: emailOrUsername.trim(),
+        password: password,
+      );
+      return null;
+    } catch (e) {
+      return e.toString().replaceFirst('Exception: ', '');
+    }
+  }
+
+  Future<String?> signUpWithBackend({
+    required String name,
+    required String username,
+    required String email,
+    required String password,
+  }) async {
+    if (name.trim().isEmpty ||
+        username.trim().isEmpty ||
+        email.trim().isEmpty ||
+        password.length < 6) {
+      return translate('error_missing_fields');
+    }
+
+    try {
+      await registerUser(
+        name: name.trim(),
+        username: username.trim(),
+        email: email.trim(),
+        password: password,
+      );
+      return null;
+    } catch (e) {
+      return e.toString().replaceFirst('Exception: ', '');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return const [];
+
+    final response = await http.get(
+      Uri.parse(
+        '$baseUrl/api/chat/search-users?query=$q&currentUserId=$_currentUserId',
+      ),
+    );
+
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode >= 400) {
+      throw Exception(data['error'] ?? 'Không tìm thấy người dùng');
+    }
+
+    final list = (data['users'] as List?) ?? const [];
+    return list.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchContacts() async {
+    if (_currentUserId.isEmpty) return const [];
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/chat/contacts/$_currentUserId'),
+    );
+
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode >= 400) {
+      throw Exception(data['error'] ?? 'Không thể lấy danh bạ');
+    }
+
+    final list = (data['contacts'] as List?) ?? const [];
+    return list.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchConversationHistory(
+    String otherUserId,
+  ) async {
+    if (_currentUserId.isEmpty || otherUserId.isEmpty) return const [];
+
+    final response = await http.get(
+      Uri.parse(
+        '$baseUrl/api/chat/messages?userA=$_currentUserId&userB=$otherUserId',
+      ),
+    );
+
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (response.statusCode >= 400) {
+      throw Exception(data['error'] ?? 'Không thể tải lịch sử chat');
+    }
+
+    final list = (data['messages'] as List?) ?? const [];
+    final mapped = list
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+
+    final conversationId =
+        data['conversationId']?.toString() ??
+        _chatKey(_currentUserId, otherUserId);
+    final thread = _privateChatThreads.putIfAbsent(conversationId, () => []);
+    thread.clear();
+    for (final item in mapped) {
+      thread.add({
+        'sender': (item['fromUserId'] ?? '').toString() == _currentUserId
+            ? 'me'
+            : (item['fromUserId'] ?? '').toString(),
+        'text': (item['message'] ?? '').toString(),
+        'imageBytes': null,
+        'timestamp': item['createdAt'] ?? DateTime.now().toIso8601String(),
+      });
+    }
+    notifyListeners();
+    return mapped;
+  }
+
+  void sendPrivateMessage(String otherUserId, String text) {
+    if (_socket == null || !_socket!.connected) {
+      return;
+    }
+
+    final message = text.trim();
+    if (message.isEmpty) return;
+
+    final payload = {
+      'fromUserId': _currentUserId,
+      'toUserId': otherUserId,
+      'message': message,
+      'conversationId': _chatKey(_currentUserId, otherUserId),
+    };
+
+    _socket!.emit('send_private_message', payload);
+
+    final thread = _privateChatThreads.putIfAbsent(
+      _chatKey(_currentUserId, otherUserId),
+      () => [],
+    );
+    thread.add({
+      'sender': 'me',
+      'text': message,
+      'imageBytes': null,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+    notifyListeners();
+  }
+
   String get userLocation =>
       _users[_loggedInUsername]?['location'] as String? ??
       translate('unknown_location');
@@ -1002,16 +1392,8 @@ class AppDataProvider extends ChangeNotifier {
   bool _isBotTyping = false;
   bool get isBotTyping => _isBotTyping;
 
-  // Xác định Server URL theo platform
-  String get _backendUrl {
-    if (kIsWeb) {
-      return 'http://localhost:5000/api/chat';
-    } else {
-      return defaultTargetPlatform == TargetPlatform.android
-          ? 'http://10.0.2.2:5000/api/chat'
-          : 'http://localhost:5000/api/chat';
-    }
-  }
+  // Xác định Server URL cho production trên Render
+  String get _backendUrl => '$baseUrl/api/chat';
 
   Future<void> sendMessage(String text) async {
     if (text.trim().isEmpty) return;
